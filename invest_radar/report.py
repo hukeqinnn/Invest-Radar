@@ -5,6 +5,8 @@ from pathlib import Path
 import sqlite3
 from zoneinfo import ZoneInfo
 
+from .files import slugify
+
 
 def _line(value: str | None) -> str:
     return value if value else "未知"
@@ -27,6 +29,28 @@ def _format_published_at(value: str | None, local_timezone: str) -> str:
     return f"{local.strftime('%Y-%m-%d %H:%M:%S')} {local_timezone} (UTC: {value})"
 
 
+def _report_label(items: list[sqlite3.Row], errors: list[str] | None) -> str:
+    if len(items) == 1:
+        row = items[0]
+        source = _line(row["source_name"])
+        return f"{source}-{row['title']}"
+
+    if len(items) > 1:
+        sources = []
+        for row in items:
+            source = _line(row["source_name"])
+            if source not in sources:
+                sources.append(source)
+        source_label = "-".join(sources[:3])
+        if len(sources) > 3:
+            source_label = f"{source_label}-等"
+        return f"{len(items)}篇-{source_label}"
+
+    if errors:
+        return "抓取错误"
+    return "无新增内容"
+
+
 def write_report(
     reports_dir: Path,
     items: list[sqlite3.Row],
@@ -36,12 +60,15 @@ def write_report(
 ) -> Path:
     reports_dir.mkdir(parents=True, exist_ok=True)
     now = datetime.now()
-    path = reports_dir / f"daily-{now.strftime('%Y-%m-%d-%H%M%S')}.md"
+    report_label = _report_label(items, errors)
+    report_slug = slugify(report_label, "report")
+    path = reports_dir / f"daily-{now.strftime('%Y-%m-%d-%H%M%S')}-{report_slug}.md"
 
     lines = [
-        f"# 每日抓取报告 {now.strftime('%Y-%m-%d')}",
+        f"# 每日抓取报告 {now.strftime('%Y-%m-%d')} - {report_label}",
         "",
         f"生成时间: {now.strftime('%Y-%m-%d %H:%M:%S')}",
+        f"报告主题: {report_label}",
         "",
         "> 本报告是信息整理，不构成投资建议。",
         "",
