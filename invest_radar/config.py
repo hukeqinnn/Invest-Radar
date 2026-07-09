@@ -30,6 +30,7 @@ class Settings:
     transcripts_dir: Path
     max_items_per_source: int
     only_today: bool
+    scan_since_last_run: bool
     local_timezone: str
     fetch_full_pages: bool
     download_audio: bool
@@ -87,6 +88,7 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         transcripts_dir=_resolve_path(root, raw_settings.get("transcripts_dir", "data/transcripts")),
         max_items_per_source=int(raw_settings.get("max_items_per_source", 5)),
         only_today=bool(raw_settings.get("only_today", False)),
+        scan_since_last_run=bool(raw_settings.get("scan_since_last_run", False)),
         local_timezone=str(raw_settings.get("local_timezone", "")),
         fetch_full_pages=bool(raw_settings.get("fetch_full_pages", False)),
         download_audio=bool(raw_settings.get("download_audio", True)),

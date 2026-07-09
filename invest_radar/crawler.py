@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 import sqlite3
 from zoneinfo import ZoneInfo
@@ -29,6 +29,7 @@ from .rss import FeedItem, parse_rss
 from .store import (
     connect,
     get_item,
+    get_state,
     init_db,
     items_needing_llm_summary,
     items_needing_llm_summary_by_ids,
@@ -36,6 +37,7 @@ from .store import (
     items_needing_transcript_by_ids,
     items_without_summary,
     items_without_summary_by_ids,
+    set_state,
     update_audio_path,
     update_summary,
     update_text_path,
@@ -43,6 +45,9 @@ from .store import (
     upsert_item,
 )
 from .summary import summarize_text
+
+
+LAST_SUCCESSFUL_SCAN_KEY = "last_successful_scan_at"
 
 
 @dataclass(frozen=True)
@@ -86,12 +91,21 @@ def _local_zone(config: AppConfig) -> ZoneInfo | None:
         return None
 
 
-def _is_published_today(published_at: str, zone: ZoneInfo | None) -> bool:
-    if not published_at:
-        return False
+def _parse_iso_datetime(value: str) -> datetime | None:
+    if not value:
+        return None
     try:
-        published = datetime.fromisoformat(published_at)
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _is_published_today(published_at: str, zone: ZoneInfo | None) -> bool:
+    published = _parse_iso_datetime(published_at)
+    if published is None:
         return False
     if zone is not None:
         published_date = published.astimezone(zone).date()
@@ -100,6 +114,37 @@ def _is_published_today(published_at: str, zone: ZoneInfo | None) -> bool:
         published_date = published.astimezone().date()
         today = datetime.now().astimezone().date()
     return published_date == today
+
+
+def _is_published_in_window(published_at: str, window_start: datetime, window_end: datetime) -> bool:
+    published = _parse_iso_datetime(published_at)
+    if published is None:
+        return False
+    return window_start <= published <= window_end
+
+
+def _fallback_scan_window_start(scan_started_at: datetime, zone: ZoneInfo | None) -> datetime:
+    local_now = scan_started_at.astimezone(zone) if zone is not None else scan_started_at.astimezone()
+    local_time = local_now.time()
+    if local_time >= time(18, 0):
+        local_start = local_now.replace(hour=10, minute=30, second=0, microsecond=0)
+    elif local_time >= time(10, 30):
+        yesterday = local_now - timedelta(days=1)
+        local_start = yesterday.replace(hour=18, minute=0, second=0, microsecond=0)
+    else:
+        yesterday = local_now - timedelta(days=1)
+        local_start = yesterday.replace(hour=18, minute=0, second=0, microsecond=0)
+    return local_start.astimezone(timezone.utc)
+
+
+def _scan_window(conn: sqlite3.Connection, config: AppConfig, zone: ZoneInfo | None) -> tuple[datetime, datetime] | None:
+    if not config.settings.scan_since_last_run:
+        return None
+
+    scan_started_at = datetime.now(timezone.utc).replace(microsecond=0)
+    saved_start = _parse_iso_datetime(get_state(conn, LAST_SUCCESSFUL_SCAN_KEY))
+    window_start = saved_start or _fallback_scan_window_start(scan_started_at, zone)
+    return window_start, scan_started_at
 
 
 def _source_for_row(config: AppConfig, row: sqlite3.Row) -> Source | None:
@@ -119,6 +164,7 @@ def _process_source(
     config: AppConfig,
     source: Source,
     zone: ZoneInfo | None,
+    scan_window: tuple[datetime, datetime] | None,
 ) -> tuple[list[int], list[int], list[str]]:
     errors: list[str] = []
     candidate_ids: list[int] = []
@@ -134,7 +180,10 @@ def _process_source(
         return [], [], [f"{source.name}: {exc}"]
 
     for item in items:
-        if config.settings.only_today and not _is_published_today(item.published_at, zone):
+        if scan_window is not None:
+            if not _is_published_in_window(item.published_at, scan_window[0], scan_window[1]):
+                continue
+        elif config.settings.only_today and not _is_published_today(item.published_at, zone):
             continue
         try:
             text = _item_text_from_feed(item, source, config)
@@ -420,13 +469,20 @@ def run(config: AppConfig) -> RunResult:
     init_db(conn)
 
     zone = _local_zone(config)
+    scan_window = _scan_window(conn, config, zone)
     candidate_ids: list[int] = []
     new_ids: list[int] = []
     errors: list[str] = []
     for source in config.sources:
         if not source.enabled:
             continue
-        source_candidate_ids, source_new_ids, source_errors = _process_source(conn, config, source, zone)
+        source_candidate_ids, source_new_ids, source_errors = _process_source(
+            conn,
+            config,
+            source,
+            zone,
+            scan_window,
+        )
         candidate_ids.extend(source_candidate_ids)
         new_ids.extend(source_new_ids)
         errors.extend(source_errors)
@@ -448,6 +504,8 @@ def run(config: AppConfig) -> RunResult:
         errors,
         local_timezone=config.settings.local_timezone,
     )
+    if scan_window is not None and not errors:
+        set_state(conn, LAST_SUCCESSFUL_SCAN_KEY, scan_window[1].isoformat())
     conn.close()
 
     return RunResult(

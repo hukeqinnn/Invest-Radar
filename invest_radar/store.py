@@ -53,6 +53,15 @@ def init_db(conn: sqlite3.Connection) -> None:
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS state (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
     _ensure_column(conn, "items", "audio_path", "TEXT")
     _ensure_column(conn, "items", "transcript", "TEXT")
     _ensure_column(conn, "items", "transcript_path", "TEXT")
@@ -203,6 +212,25 @@ def get_item(conn: sqlite3.Connection, item_id: int) -> sqlite3.Row:
     if row is None:
         raise KeyError(f"Item not found: {item_id}")
     return row
+
+
+def get_state(conn: sqlite3.Connection, key: str) -> str:
+    row = conn.execute("SELECT value FROM state WHERE key = ?", (key,)).fetchone()
+    return "" if row is None else str(row["value"])
+
+
+def set_state(conn: sqlite3.Connection, key: str, value: str) -> None:
+    conn.execute(
+        """
+        INSERT INTO state (key, value, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(key) DO UPDATE
+              SET value = excluded.value,
+                  updated_at = excluded.updated_at
+        """,
+        (key, value, utc_now_iso()),
+    )
+    conn.commit()
 
 
 def items_without_summary(conn: sqlite3.Connection) -> list[sqlite3.Row]:
