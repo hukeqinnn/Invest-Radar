@@ -140,3 +140,24 @@ enabled = true
 fetch_full_pages = false
 download_audio = false
 transcribe_audio = false
+
+[[sources]]
+name = "截胡不截财"
+type = "rss"
+url = "https://feed.xyzfm.space/wyyl8fbhlnfl"
+enabled = true
+fetch_full_pages = false
+
+[[sources]]
+name = "苔藓之火"
+type = "rss"
+url = "https://feed.xyzfm.space/c6t98368jtpv"
+enabled = true
+fetch_full_pages = false
+
+[[sources]]
+name = "The Wanderers 流浪者"
+type = "rss"
+url = "https://feed.xyzfm.space/ukgvfq899txk"
+enabled = true
+fetch_full_pages = false
