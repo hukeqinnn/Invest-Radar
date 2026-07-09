@@ -154,7 +154,11 @@ def _process_source(
                 text=text,
             )
             row = get_item(conn, stored.id)
-            text_path = write_item_markdown(config.settings.texts_dir, row)
+            text_path = write_item_markdown(
+                config.settings.texts_dir,
+                row,
+                local_timezone=config.settings.local_timezone,
+            )
             update_text_path(conn, stored.id, text_path)
             candidate_ids.append(stored.id)
             if stored.is_new:
@@ -215,6 +219,7 @@ def _summarize_rows_with_llm(
                 row["source_name"],
                 row["title"],
                 row["published_at"] or "",
+                config.settings.local_timezone,
             )
             write_summary_markdown(
                 summary_path,
@@ -342,6 +347,7 @@ def process_pending_transcripts(
                 row["title"],
                 row["published_at"] or "",
                 row["audio_url"],
+                config.settings.local_timezone,
             )
             should_download = _source_bool(
                 source.download_audio if source is not None else None,
@@ -364,6 +370,7 @@ def process_pending_transcripts(
                 row["source_name"],
                 row["title"],
                 row["published_at"] or "",
+                config.settings.local_timezone,
             )
             transcript = transcribe_audio(
                 whisper_command=config.settings.whisper_command,

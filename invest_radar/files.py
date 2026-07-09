@@ -4,6 +4,7 @@ from datetime import datetime
 from pathlib import Path
 import re
 import sqlite3
+from zoneinfo import ZoneInfo
 
 
 def slugify(value: str, fallback: str = "item") -> str:
@@ -14,19 +15,34 @@ def slugify(value: str, fallback: str = "item") -> str:
     return value[:90] or fallback
 
 
-def date_prefix(value: str) -> str:
+def _now_prefix(local_timezone: str) -> str:
+    if local_timezone:
+        try:
+            return datetime.now(ZoneInfo(local_timezone)).strftime("%Y-%m-%d")
+        except Exception:
+            pass
+    return datetime.now().strftime("%Y-%m-%d")
+
+
+def date_prefix(value: str, local_timezone: str = "") -> str:
     if not value:
-        return datetime.now().strftime("%Y-%m-%d")
+        return _now_prefix(local_timezone)
     try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00")).strftime("%Y-%m-%d")
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError:
-        return datetime.now().strftime("%Y-%m-%d")
+        return _now_prefix(local_timezone)
+    if local_timezone:
+        try:
+            parsed = parsed.astimezone(ZoneInfo(local_timezone))
+        except Exception:
+            pass
+    return parsed.strftime("%Y-%m-%d")
 
 
-def write_item_markdown(texts_dir: Path, row: sqlite3.Row) -> Path:
+def write_item_markdown(texts_dir: Path, row: sqlite3.Row, local_timezone: str = "") -> Path:
     source_dir = texts_dir / slugify(row["source_name"], "source")
     source_dir.mkdir(parents=True, exist_ok=True)
-    filename = f"{date_prefix(row['published_at'])}-{slugify(row['title'], str(row['id']))}.md"
+    filename = f"{date_prefix(row['published_at'], local_timezone)}-{slugify(row['title'], str(row['id']))}.md"
     path = source_dir / filename
 
     lines = [

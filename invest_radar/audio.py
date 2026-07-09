@@ -18,17 +18,30 @@ def _extension_from_url(url: str) -> str:
     return ".m4a"
 
 
-def audio_path_for_item(audio_dir: Path, source_name: str, title: str, published_at: str, url: str) -> Path:
+def audio_path_for_item(
+    audio_dir: Path,
+    source_name: str,
+    title: str,
+    published_at: str,
+    url: str,
+    local_timezone: str = "",
+) -> Path:
     source_dir = audio_dir / slugify(source_name, "source")
     source_dir.mkdir(parents=True, exist_ok=True)
-    filename = f"{date_prefix(published_at)}-{slugify(title)}{_extension_from_url(url)}"
+    filename = f"{date_prefix(published_at, local_timezone)}-{slugify(title)}{_extension_from_url(url)}"
     return source_dir / filename
 
 
-def transcript_path_for_item(transcripts_dir: Path, source_name: str, title: str, published_at: str) -> Path:
+def transcript_path_for_item(
+    transcripts_dir: Path,
+    source_name: str,
+    title: str,
+    published_at: str,
+    local_timezone: str = "",
+) -> Path:
     source_dir = transcripts_dir / slugify(source_name, "source")
     source_dir.mkdir(parents=True, exist_ok=True)
-    filename = f"{date_prefix(published_at)}-{slugify(title)}.full.md"
+    filename = f"{date_prefix(published_at, local_timezone)}-{slugify(title)}.full.md"
     return source_dir / filename
 
 

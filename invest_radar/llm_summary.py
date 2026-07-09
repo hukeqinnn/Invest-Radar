@@ -266,10 +266,16 @@ def summarize_with_llm(title: str, source: str, transcript: str, config: LLMConf
     return call_openai_responses(reduce_prompt(title, source, chunk_summaries), config)
 
 
-def summary_path_for_item(summaries_dir: Path, source_name: str, title: str, published_at: str) -> Path:
+def summary_path_for_item(
+    summaries_dir: Path,
+    source_name: str,
+    title: str,
+    published_at: str,
+    local_timezone: str = "",
+) -> Path:
     source_dir = summaries_dir / slugify(source_name, "source")
     source_dir.mkdir(parents=True, exist_ok=True)
-    return source_dir / f"{date_prefix(published_at)}-{slugify(title)}.summary.md"
+    return source_dir / f"{date_prefix(published_at, local_timezone)}-{slugify(title)}.summary.md"
 
 
 def write_summary_markdown(
