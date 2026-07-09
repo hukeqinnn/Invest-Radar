@@ -32,10 +32,16 @@ def main() -> int:
             "PYTHONPATH": str(PROJECT_ROOT),
             "PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
         },
-        "StartCalendarInterval": {
-            "Hour": 10,
-            "Minute": 30,
-        },
+        "StartCalendarInterval": [
+            {
+                "Hour": 10,
+                "Minute": 30,
+            },
+            {
+                "Hour": 18,
+                "Minute": 0,
+            },
+        ],
         "StandardOutPath": str(logs_dir / "launchd.out.log"),
         "StandardErrorPath": str(logs_dir / "launchd.err.log"),
         "RunAtLoad": False,
@@ -50,7 +56,7 @@ def main() -> int:
     subprocess.run(["launchctl", "enable", f"gui/{uid}/{LABEL}"], check=True)
 
     print(f"Installed launchd job: {PLIST_PATH}")
-    print("Schedule: every day at 10:30 local time")
+    print("Schedule: every day at 10:30 and 18:00 local time")
     return 0
 
 
