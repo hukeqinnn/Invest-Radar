@@ -16,6 +16,9 @@ class Source:
     type: str = "rss"
     enabled: bool = True
     fetch_full_pages: bool | None = None
+    download_audio: bool | None = None
+    transcribe_audio: bool | None = None
+    delete_audio_after_transcription: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -121,6 +124,9 @@ def load_config(path: str | Path | None = None) -> AppConfig:
                 type=str(item.get("type", "rss")),
                 enabled=bool(item.get("enabled", True)),
                 fetch_full_pages=item.get("fetch_full_pages"),
+                download_audio=item.get("download_audio"),
+                transcribe_audio=item.get("transcribe_audio"),
+                delete_audio_after_transcription=item.get("delete_audio_after_transcription"),
             )
         )
 

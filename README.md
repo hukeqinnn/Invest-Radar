@@ -90,6 +90,13 @@ enabled = true
 fetch_full_pages = false
 ```
 
+如果某个 RSS 源不允许下载或再处理音频，可以只抓取 RSS 文本：
+
+```toml
+download_audio = false
+transcribe_audio = false
+```
+
 ## 安装每天 10:30 定时任务
 
 ```bash

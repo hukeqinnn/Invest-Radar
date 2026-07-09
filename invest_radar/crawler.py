@@ -102,6 +102,18 @@ def _is_published_today(published_at: str, zone: ZoneInfo | None) -> bool:
     return published_date == today
 
 
+def _source_for_row(config: AppConfig, row: sqlite3.Row) -> Source | None:
+    source_url = row["source_url"] if "source_url" in row.keys() else ""
+    for source in config.sources:
+        if source.url == source_url:
+            return source
+    return None
+
+
+def _source_bool(value: bool | None, default: bool) -> bool:
+    return default if value is None else bool(value)
+
+
 def _process_source(
     conn: sqlite3.Connection,
     config: AppConfig,
@@ -300,18 +312,29 @@ def process_pending_transcripts(
     config: AppConfig,
     candidate_ids: list[int],
 ) -> tuple[list[int], list[str]]:
-    if not config.settings.transcribe_audio:
-        return [], []
     if not candidate_ids:
+        return [], []
+
+    errors: list[str] = []
+    transcribed_ids: list[int] = []
+    rows = items_needing_transcript_by_ids(conn, candidate_ids, config.settings.max_transcriptions_per_run)
+    rows_to_transcribe: list[tuple[sqlite3.Row, Source | None]] = []
+    for row in rows:
+        source = _source_for_row(config, row)
+        should_transcribe = _source_bool(
+            source.transcribe_audio if source is not None else None,
+            config.settings.transcribe_audio,
+        )
+        if should_transcribe:
+            rows_to_transcribe.append((row, source))
+
+    if not rows_to_transcribe:
         return [], []
 
     if not config.settings.whisper_model.exists():
         return [], [f"Whisper model not found: {config.settings.whisper_model}"]
 
-    errors: list[str] = []
-    transcribed_ids: list[int] = []
-    rows = items_needing_transcript_by_ids(conn, candidate_ids, config.settings.max_transcriptions_per_run)
-    for row in rows:
+    for row, source in rows_to_transcribe:
         try:
             audio_path = audio_path_for_item(
                 config.settings.audio_dir,
@@ -320,9 +343,21 @@ def process_pending_transcripts(
                 row["published_at"] or "",
                 row["audio_url"],
             )
-            if config.settings.download_audio:
+            should_download = _source_bool(
+                source.download_audio if source is not None else None,
+                config.settings.download_audio,
+            )
+            should_delete = _source_bool(
+                source.delete_audio_after_transcription if source is not None else None,
+                config.settings.delete_audio_after_transcription,
+            )
+            if should_download:
                 download_audio(row["audio_url"], audio_path)
                 update_audio_path(conn, int(row["id"]), audio_path)
+            elif row["audio_path"]:
+                audio_path = Path(row["audio_path"])
+            elif not audio_path.exists():
+                raise RuntimeError("audio download disabled and no local audio file found")
 
             transcript_path = transcript_path_for_item(
                 config.settings.transcripts_dir,
@@ -348,7 +383,7 @@ def process_pending_transcripts(
                 transcript=transcript,
             )
             update_transcript(conn, int(row["id"]), transcript, transcript_path)
-            if config.settings.delete_audio_after_transcription:
+            if should_delete:
                 delete_audio_artifacts(audio_path)
                 update_audio_path(conn, int(row["id"]), "")
             update_summary(
