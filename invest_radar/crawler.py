@@ -48,6 +48,7 @@ from .summary import summarize_text
 
 
 LAST_SUCCESSFUL_SCAN_KEY = "last_successful_scan_at"
+SOURCE_SUCCESSFUL_SCAN_PREFIX = "last_successful_scan_at:source:"
 
 
 @dataclass(frozen=True)
@@ -137,14 +138,32 @@ def _fallback_scan_window_start(scan_started_at: datetime, zone: ZoneInfo | None
     return local_start.astimezone(timezone.utc)
 
 
-def _scan_window(conn: sqlite3.Connection, config: AppConfig, zone: ZoneInfo | None) -> tuple[datetime, datetime] | None:
+def _source_state_key(source: Source) -> str:
+    return f"{SOURCE_SUCCESSFUL_SCAN_PREFIX}{source.url}"
+
+
+def _scan_window_for_source(
+    conn: sqlite3.Connection,
+    config: AppConfig,
+    source: Source,
+    zone: ZoneInfo | None,
+    scan_started_at: datetime,
+) -> tuple[datetime, datetime] | None:
     if not config.settings.scan_since_last_run:
         return None
 
-    scan_started_at = datetime.now(timezone.utc).replace(microsecond=0)
-    saved_start = _parse_iso_datetime(get_state(conn, LAST_SUCCESSFUL_SCAN_KEY))
+    saved_start = _parse_iso_datetime(get_state(conn, _source_state_key(source)))
+    if saved_start is None:
+        saved_start = _parse_iso_datetime(get_state(conn, LAST_SUCCESSFUL_SCAN_KEY))
     window_start = saved_start or _fallback_scan_window_start(scan_started_at, zone)
     return window_start, scan_started_at
+
+
+def _source_url_for_error(config: AppConfig, error: str) -> str:
+    for source in config.sources:
+        if error.startswith(f"{source.name}:") or error.startswith(f"{source.name} /"):
+            return source.url
+    return ""
 
 
 def _source_for_row(config: AppConfig, row: sqlite3.Row) -> Source | None:
@@ -469,13 +488,18 @@ def run(config: AppConfig) -> RunResult:
     init_db(conn)
 
     zone = _local_zone(config)
-    scan_window = _scan_window(conn, config, zone)
+    scan_started_at = datetime.now(timezone.utc).replace(microsecond=0)
     candidate_ids: list[int] = []
     new_ids: list[int] = []
     errors: list[str] = []
+    errors_by_source: dict[str, list[str]] = {}
+    source_windows: dict[str, tuple[datetime, datetime]] = {}
     for source in config.sources:
         if not source.enabled:
             continue
+        scan_window = _scan_window_for_source(conn, config, source, zone, scan_started_at)
+        if scan_window is not None:
+            source_windows[source.url] = scan_window
         source_candidate_ids, source_new_ids, source_errors = _process_source(
             conn,
             config,
@@ -486,14 +510,23 @@ def run(config: AppConfig) -> RunResult:
         candidate_ids.extend(source_candidate_ids)
         new_ids.extend(source_new_ids)
         errors.extend(source_errors)
+        errors_by_source.setdefault(source.url, []).extend(source_errors)
 
     candidate_ids = list(dict.fromkeys(candidate_ids))
     transcribed_ids, transcript_errors = process_pending_transcripts(conn, config, candidate_ids)
     errors.extend(transcript_errors)
+    for error in transcript_errors:
+        source_url = _source_url_for_error(config, error)
+        if source_url:
+            errors_by_source.setdefault(source_url, []).append(error)
 
     llm_candidates = list(dict.fromkeys([*candidate_ids, *transcribed_ids]))
     llm_summary_ids, llm_errors = summarize_pending_with_llm(conn, config, llm_candidates)
     errors.extend(llm_errors)
+    for error in llm_errors:
+        source_url = _source_url_for_error(config, error)
+        if source_url:
+            errors_by_source.setdefault(source_url, []).append(error)
 
     summarized_count = summarize_pending(conn, config, candidate_ids)
     report_ids = list(dict.fromkeys([*candidate_ids, *transcribed_ids, *llm_summary_ids]))
@@ -504,8 +537,11 @@ def run(config: AppConfig) -> RunResult:
         errors,
         local_timezone=config.settings.local_timezone,
     )
-    if scan_window is not None and not errors:
-        set_state(conn, LAST_SUCCESSFUL_SCAN_KEY, scan_window[1].isoformat())
+    for source in config.sources:
+        if not source.enabled or source.url not in source_windows:
+            continue
+        if not errors_by_source.get(source.url):
+            set_state(conn, _source_state_key(source), source_windows[source.url][1].isoformat())
     conn.close()
 
     return RunResult(

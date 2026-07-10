@@ -11,6 +11,7 @@ venv/
 data/
 reports/
 logs/
+tmp/
 
 models/*.bin
 models/*.gguf
